@@ -69,7 +69,6 @@ def clear_screen():
     os.system("cls" if os.name == "nt" else "clear")
 
 
-
 def get_key_press():
     """
     Gets a single character from the user without waiting for Enter.
@@ -140,17 +139,24 @@ def draw_frame(env):
     fx, fy = env.food_pos
     buffer[fy][fx] = color(GLYPH_FOOD, COLOR_FOOD)
 
+    score_text = f"SCORE: {env.score}"
+    score_len = len(score_text)//2
+
     # Assemble the final output string with walls
-    output = ""
-    output += color(GLYPH_CORNER_TL + (GLYPH_WALL_H * 2 * env.WIDTH) + GLYPH_CORNER_TR + "\n", COLOR_WALL)
+    output = color(GLYPH_CORNER_TL + (GLYPH_WALL_H * 2 * env.WIDTH) + GLYPH_CORNER_TR + "\n", COLOR_WALL)
     for row in buffer:
         output += color(GLYPH_WALL_V, COLOR_WALL) + "".join(row) + color(GLYPH_WALL_V + "\n", COLOR_WALL)
-    output += color(GLYPH_CORNER_BL + (GLYPH_WALL_H * 2 * env.WIDTH) + GLYPH_CORNER_BR + "\n", COLOR_WALL)
-    output += f"Score: {env.score} | Controls: WASD/Arrows | 'q' to Quit\n"
+
+
+    bottom_text = [
+        f"{color(GLYPH_CORNER_BL + ((GLYPH_WALL_H * (env.WIDTH - score_len))), COLOR_WALL)}",
+        f"{color(score_text, COLOR_WALL + COLOR_BOLD)}",
+        f"{color(((GLYPH_WALL_H * (env.WIDTH - score_len)) + GLYPH_CORNER_BR), COLOR_WALL)}"]
+
+    output += "".join(bottom_text)
 
     sys.stdout.write("\033[?25l") 
     sys.stdout.write("\033[H")  
     sys.stdout.write(output)
     sys.stdout.flush()
     sys.stdout.write("\033[?25h")
-
