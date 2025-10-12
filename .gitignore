@@ -1,0 +1,42 @@
+# Python-specific files
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.env/
+venv/
+env/
+instance/
+
+# PyTorch and machine learning related files
+*.pt
+*.pth
+*.bin
+*.onnx
+runs/
+logs/
+checkpoints/
+models/
+data/
+datasets/
+results/
+outputs/
+tensorboard/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook specific files
+.ipynb_checkpoints/
+
+# Miscellaneous
+*.log
+*.tmp
