@@ -1,6 +1,6 @@
 # --- Game Configuration ---
 import random
-
+import math
 
 
 ACTION_SPACE = {
@@ -13,12 +13,12 @@ ACTION_SPACE = {
 
 class SnakeEnv():
     def __init__(self, width=32, height=32):
-    # --- Environment Initialization ---
+        # --- Environment Initialization ---
         self.WIDTH = width
         self.HEIGHT = height
 
-    # --- Game State ---
-    # The snake starts with 3 segments, moving right
+        # --- Game State ---
+        # The snake starts with 3 segments, moving right
         start_x = self.WIDTH // 2
         start_y = self.HEIGHT // 2
 
@@ -35,10 +35,8 @@ class SnakeEnv():
         while True:
             food_pos = (random.randint(0, self.WIDTH - 1), random.randint(0, self.HEIGHT - 1))
             if food_pos not in self.snake:
+                # self.food_pos = food_pos
                 break
-
-    def get_observation(self):
-        pass
 
     def update_direction(self, action):
         """Updates the snake's direction based on the action."""
@@ -47,32 +45,43 @@ class SnakeEnv():
         if (new_direction[0] != -self.direction[0] or new_direction[1] != -self.direction[1]):
             self.direction = new_direction
 
+    def distance(self, pos1, pos2):
+        """Calculates the Euclidean distance between two points."""
+        return abs(pos1[0] - pos2[0])  + abs(pos1[1] - pos2[1])
+
     def step(self, action):
         """Moves the snake, checks for collisions and food."""
 
         self.update_direction(action)
-
 
         # Calculate new head position
         head_x, head_y = self.snake[0]
         dx, dy = self.direction
         new_head = (head_x + dx, head_y + dy)
 
+
+        old_dist = self.distance(self.snake[0], self.food_pos)
+        new_dist = self.distance(new_head, self.food_pos)
+
+        reward = -1 if new_dist >= old_dist else 1
+
         if not (0 <= new_head[0] < self.WIDTH and 0 <= new_head[1] < self.HEIGHT):
             self.game_over = True
-            return
+            return 0
 
         if new_head in self.snake[:-1]:
             self.game_over = True
-            return
+            return 0
 
         self.snake.insert(0, new_head)
 
         # Check for food
         if new_head == self.food_pos:
             self.score += 10
-            self.place_food()
+            # self.place_food()
+            self.game_over = True
+            # reward = 0
         else:
             self.snake.pop()
 
-        return self.get_observation(), self.score, self.game_over, False, {}
+        return reward

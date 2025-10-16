@@ -2,7 +2,6 @@
 import os
 import sys
 
-GLYPH_SNAKE_HEAD = "◇"
 GLYPH_SNAKE_BODY = "■"
 GLYPH_FOOD = "🍉"
 GLYPH_WALL_H = "═"
@@ -48,6 +47,7 @@ COLOR_WHITE_BG = '\033[47m'
 COLOR_FOOD = COLOR_MAGENTA + COLOR_BLACK_BG + COLOR_BOLD
 COLOR_WALL = COLOR_RED + COLOR_BLACK_BG + COLOR_BOLD
 COLOR_SNAKE = COLOR_GREEN + COLOR_BLACK_BG + COLOR_BOLD
+COLOR_SNAKE_HEAD = COLOR_YELLOW + COLOR_BLACK_BG + COLOR_BOLD
 
 # Platform-specific imports for non-blocking keyboard input
 try:
@@ -133,8 +133,8 @@ def draw_frame(env):
     buffer = [[color("  ",COLOR_BLACK_BG) for _ in range(env.WIDTH)] for _ in range(env.HEIGHT)]
 
     for i, (x, y) in enumerate(env.snake):
-        char = GLYPH_SNAKE_HEAD if i == 0 else GLYPH_SNAKE_BODY
-        buffer[y][x] = color(char, COLOR_SNAKE) + color(" ", COLOR_BLACK_BG)
+        char = color(GLYPH_SNAKE_BODY, COLOR_SNAKE_HEAD if i == 0 else COLOR_SNAKE)
+        buffer[y][x] = char + color(" ", COLOR_BLACK_BG)
 
     fx, fy = env.food_pos
     buffer[fy][fx] = color(GLYPH_FOOD, COLOR_FOOD)
