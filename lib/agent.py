@@ -2,38 +2,49 @@
 import math
 import os
 import random
-
 import numpy as np
 
-from lib.env import ACTION_SPACE
 
+from lib.term import draw_frame
+from lib.env import ACTION_SPACE, SnakeEnv
+
+random.seed(42)
 np.random.seed(42)
 
 
-class Agent():
+WIDTH = 10
+HEIGHT = 10
+
+class Snake():
+    def __init__(self):
+        self.env = SnakeEnv(width=WIDTH, height=HEIGHT)
+        self.rewards = []
+        self.scores = []
+
+    def train(self):
+        self.env.reset()
+
+        train_rewards = []
+        train_steps = 0
+        while not self.env.game_over:
+            step_reward = self.forward()
+            train_rewards.append(step_reward)
+            train_steps += 1
+
+            draw_frame(self.env)
+
+        self.rewards.append(sum(train_rewards)/train_steps)
+
     """Abstract base class for snake bot algorithms."""
-    def forward(self, snake, food_pos, current_direction, width, height) -> int:
+    def forward(self) -> int:
         """
-        Calculate the next direction for the snake.
-        
-        Args:
-            snake: List of (x, y) tuples representing snake positions
-            food_pos: (x, y) tuple for food location
-            current_direction: Current (dx, dy) direction tuple
-            width: Game board width
-            height: Game board height
-            
+        Calculate the next action for the snake and advance on step
         Returns:
-            Action for the next direction
+            Reward from taking an action in the environment
         """
-        pass
-
-
-class Snake_RandomWalk(Agent):
-    def forward(self, env) -> int:
         action = random.randint(0, 3)   
-        reward = env.step(action)
-        return np.average(reward)
+        reward = self.env.step(action)
+        return reward
 
 
 # Simple Value Estimator
@@ -55,7 +66,7 @@ class Snake_RandomWalk(Agent):
 
 # q*(a) = E[R_t | a_t = a]  # Expected return after taking action a
 
-class Snake_FourArmedBandit(Agent):
+class Snake_FourArmedBandit(Snake):
     """ 
     Simple k-armed Bandit  
     initialize for all a in ACTION_SPACE: 
@@ -73,157 +84,114 @@ class Snake_FourArmedBandit(Agent):
 
     Values stored in a dictionary with keys as (snake_tuple, food_pos)
     """
-    def __init__(self, width=32, height=32, learning_rate=0.1, discount_factor=0.9):
+    def __init__(self, learning_rate=0.1, discount_factor=0.9):
         super().__init__()
         self.q_values = [0 for _ in range(len(ACTION_SPACE))]  # State-Value dictionary
         self.num_action_taken  = [0 for _ in range(len(ACTION_SPACE))]  # Nt(a)
         self.learning_rate = learning_rate  # α
-        self.isTraining = True
         self.epsilon = .1
-        self.degree_of_exploration = 2
-        self.time = 1
 
-    def forward(self, env) -> int:
-        action = random.randint(0, 3)
+    def forward(self) -> int:
+        # eplore if random float below epsilon, else choose greedy action
+        action = random.randint(0, 3) if random.random() < .01 else np.argmax(self.q_values)
 
-        # 10% exploration rate
-        explore = (random.random() < .01) and self.isTraining
-        # Choose action greedily
-        if not explore:
-            action = np.argmax(self.q_values)
-
-        reward = env.step(action)
+        reward = self.env.step(action)
         self.num_action_taken[action] += 1
-        self.time += 1
 
         self.q_values[action] = self.q_values[action] + self.learning_rate * (
             reward  - self.q_values[action]
         )
 
-        return np.average(reward)
+        return reward
 
 
-# class GreedyBot(SnakeBot):
-#     """Simple bot that always moves toward the food."""
+### Associative Learning
+# So far, we only learn the average value of the actions, which isn't enough to even steer the snake to the food reward.
+# We want Q(a,s), which is defined in terms of v(s)
+# q*(s,a) = max_π q_π(s,a)
+# q*(s,a) = E[R_t+1 + γv*(S_t+1) | S_t = s, A_t = a]
 
-#     def get_next_direction(self, snake, food_pos, current_direction, width, height):
-#         head_x, head_y = snake[0]
-#         food_x, food_y = food_pos
+# Compared to Multi-Armed bandit, we now take into account the actual state
+# and thus value-function(Total amount of reward that an agent can expect to accumulate over the future)
+# starting from state S_t and following policy π.
+# v*(S_t+1) = E[R|S_t+1]
 
-#         # Calculate differences
-#         dx_to_food = food_x - head_x
-#         dy_to_food = food_y - head_y
+class Snake_Associative(Snake):
+    """
+    ☆*: .｡. o(≧▽≦)o .｡.:*☆
+    Tries to learn q_values for state-action pairs instead of just actions
 
-#         # Possible directions in priority order
-#         possible_directions = []
+    π(a) - probability of a certain action [0,1]
+    q(a,s) - quality of the action taken(expected return from performing an action)
+    v(s) - expected return of being in a state
+    forms a dependency chain:
+        π -> q -> v
 
-#         # Prioritize horizontal or vertical based on distance
-#         if abs(dx_to_food) > abs(dy_to_food):
-#             if dx_to_food > 0:
-#                 possible_directions.append((1, 0))   # Right
-#             elif dx_to_food < 0:
-#                 possible_directions.append((-1, 0))  # Left
+    so, to get π, we need to calculate v, and q, then update our probability distribution
+        
+    Q-Learning Algorithm:
 
-#             if dy_to_food > 0:
-#                 possible_directions.append((0, 1))   # Down
-#             elif dy_to_food < 0:
-#                 possible_directions.append((0, -1))  # Up
-#         else:
-#             if dy_to_food > 0:
-#                 possible_directions.append((0, 1))   # Down
-#             elif dy_to_food < 0:
-#                 possible_directions.append((0, -1))  # Up
+    self.q_values[state] -> 4 q_values for each action
+    
+    1. Initialize Q(s,a) = 0 for all states s and actions a
+    2. Set number of episodes E (about 10,000)
+    3. Set maximum steps per episode T (From beginning to death)
+    4. For each episode e = 1, 2, ..., E:
+        a. t ← 1 
+        b. Select random initial state s₁
+        c. While goal state not reached and t ≤ T:
+            i.   Select action aₖ (ε-greedy or random)
+            ii.  Record resulting state sₜ₊₁ and reward rₜ
+            iii. Q(sₜ,aₜ) ← rₜ + γ * max Q(sₜ₊₁,a)
+            iv.  t ← t + 1
+        d. End while
+    5. End for
+    """
+    def __init__(self, width=10, height=10, learning_rate=0.1, discount_factor=1):
+        super().__init__()
+        self.max_score = 0
+        self.learning_rate = learning_rate  # α
+        self.discount = discount_factor
+        self.q_values = {}
 
-#             if dx_to_food > 0:
-#                 possible_directions.append((1, 0))   # Right
-#             elif dx_to_food < 0:
-#                 possible_directions.append((-1, 0))  # Left
 
-#         # Add perpendicular directions as fallback
-#         if current_direction[0] == 0:  # Currently moving vertically
-#             possible_directions.extend([(1, 0), (-1, 0)])
-#         else:  # Currently moving horizontally
-#             possible_directions.extend([(0, 1), (0, -1)])
+        #initialize q_value table with all possible state(food_pos, head_pos) values, 
+        # which returns an array of q_values for each action at that state
+        # q(s) -> {q_value(a | state)} for all a
+        for x in range(self.env.WIDTH):
+            for y in range(self.env.HEIGHT):
+                for i in range(self.env.WIDTH):
+                    for j in range(self.env.HEIGHT):
+                        self.q_values[((x, y), (i, j))] = [0 for _ in range(len(ACTION_SPACE))]
 
-#         # Try each direction and pick the first valid one
-#         for new_dir in possible_directions:
-#             if self._is_opposite_direction(new_dir, current_direction):
-#                 continue
 
-#             new_head = (head_x + new_dir[0], head_y + new_dir[1])
+    def train(self):
+        self.env.reset()
+        train_rewards = []
+        train_steps = 0
 
-#             # Check if this move is safe
-#             if self._is_valid_move(new_head, snake, width, height):
-#                 return new_dir
+        while not self.env.game_over:
+            step_reward = self.forward()
+            train_rewards.append(step_reward)
+            train_steps += 1
+            # draw_frame(self.env)
 
-#         # If no safe move found, continue current direction
-#         return current_direction
+        self.rewards.append(sum(train_rewards)/train_steps)
+        self.scores.append(self.env.score)
+        self.max_score = max(self.env.score, self.max_score)
 
-#     def _is_opposite_direction(self, new_dir, current_dir):
-#         """Check if new direction is opposite to current direction."""
-#         return (new_dir[0] == -current_dir[0] and new_dir[1] == -current_dir[1])
+    def forward(self) -> int:
+        state = (self.env.food_pos, self.env.snake[0])
 
-#     def _is_valid_move(self, pos, snake, width, height):
-#         """Check if a position is valid (not wall or snake body)."""
-#         x, y = pos
-#         if not (0 <= x < width and 0 <= y < height):
-#             return False
-#         if pos in snake[:-1]:  # Exclude tail as it will move
-#             return False
-#         return True
+        # eplore if random float below epsilon, else choose greedy action
+        action = random.randint(0, 3) if random.random() < .01 else np.argmax(self.q_values[state])
+        reward = self.env.step(action)
 
-# class PathfindingBot(SnakeBot):
-#     """Bots that uses BFS to find the hortest path to food."""
+        # Updated State at t+1
+        state_prime = (self.env.food_pos, self.env.snake[0])
 
-#     def get_next_direction(self, snake, food_pos, current_direction, width, height):
-#         path = self._bfs_to_food(snake, food_pos, width, height)
+        self.q_values[state][action] = self.q_values[state][action] + self.learning_rate * (
+            reward  - self.q_values[state_prime][action]
+        )
 
-#         if path and len(path) > 1:
-#             # Get the first step in the path
-#             next_pos = path[1]
-#             head_x, head_y = snake[0]
-#             new_dir = (next_pos[0] - head_x, next_pos[1] - head_y)
-
-#             # Make sure it's not opposite direction
-#             if not self._is_opposite_direction(new_dir, current_direction):
-#                 return new_dir
-
-#         # Fallback to greedy approach if no path found
-#         greedy = GreedyBot()
-#         return greedy.get_next_direction(snake, food_pos, current_direction, width, height)
-
-#     def _bfs_to_food(self, snake, food_pos, width, height):
-#         """Use BFS to find shortest path to food."""
-#         head = snake[0]
-#         queue = deque([(head, [head])])
-#         visited = {head}
-
-#         while queue:
-#             current_pos, path = queue.popleft()
-
-#             if current_pos == food_pos:
-#                 return path
-
-#             # Explore neighbors
-#             for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-#                 next_pos = (current_pos[0] + dx, current_pos[1] + dy)
-
-#                 if next_pos in visited:
-#                     continue
-
-#                 # Check if position is valid
-#                 if not (0 <= next_pos[0] < width and 0 <= next_pos[1] < height):
-#                     continue
-
-#                 # Allow moving to tail position as it will move away
-#                 if next_pos in snake[:-1]:
-#                     continue
-
-#                 visited.add(next_pos)
-#                 queue.append((next_pos, path + [next_pos]))
-
-#         return None  # No path found
-
-#     def _is_opposite_direction(self, new_dir, current_dir):
-#         """Check if new direction is opposite to current direction."""
-#         return (new_dir[0] == -current_dir[0] and new_dir[1] == -current_dir[1])
+        return reward

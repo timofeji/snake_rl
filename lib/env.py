@@ -1,7 +1,6 @@
 # --- Game Configuration ---
 import random
-import math
-
+random.seed(42)
 
 ACTION_SPACE = {
     0: (1, 0),   # Right
@@ -16,14 +15,20 @@ class SnakeEnv():
         # --- Environment Initialization ---
         self.WIDTH = width
         self.HEIGHT = height
+        self.reset()
 
+    def reset(self):
         # --- Game State ---
         # The snake starts with 3 segments, moving right
         start_x = self.WIDTH // 2
         start_y = self.HEIGHT // 2
 
-        self.snake = [(start_x, start_y), (start_x - 1, start_y), (start_x - 2, start_y)]
-        self.food_pos = (0, 0)
+        self.snake = [
+            (start_x, start_y),
+            (start_x - 1, start_y),
+            (start_x - 2, start_y),
+        ]
+        self.food_pos = (2, 2)
         self.direction = (1, 0)  # (dx, dy)
         self.score = 0
         self.game_over = False
@@ -35,7 +40,7 @@ class SnakeEnv():
         while True:
             food_pos = (random.randint(0, self.WIDTH - 1), random.randint(0, self.HEIGHT - 1))
             if food_pos not in self.snake:
-                # self.food_pos = food_pos
+                self.food_pos = food_pos
                 break
 
     def update_direction(self, action):
@@ -59,7 +64,6 @@ class SnakeEnv():
         dx, dy = self.direction
         new_head = (head_x + dx, head_y + dy)
 
-
         old_dist = self.distance(self.snake[0], self.food_pos)
         new_dist = self.distance(new_head, self.food_pos)
 
@@ -67,20 +71,19 @@ class SnakeEnv():
 
         if not (0 <= new_head[0] < self.WIDTH and 0 <= new_head[1] < self.HEIGHT):
             self.game_over = True
-            return 0
+            return -1
 
         if new_head in self.snake[:-1]:
             self.game_over = True
-            return 0
+            return -5
 
         self.snake.insert(0, new_head)
 
         # Check for food
         if new_head == self.food_pos:
             self.score += 10
-            # self.place_food()
-            self.game_over = True
-            # reward = 0
+            self.place_food()
+            reward = 10
         else:
             self.snake.pop()
 

@@ -3,72 +3,49 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 
-from lib.agent import Snake_FourArmedBandit, Snake_RandomWalk
-from lib.env import SnakeEnv
+from lib.agent import Snake, Snake_Associative, Snake_FourArmedBandit
 from lib.term import *
 
 
-WIDTH = 10
-HEIGHT = 10
+NUM_EPISODES = 50000
 TICK_RATE = 0.1
-NUM_EPISODES = 5000
 
-agent_random = Snake_RandomWalk()
-agent_fourarmed = Snake_FourArmedBandit()
+
+
 clear_screen()
 
-steps = np.arange(NUM_EPISODES)
-rewards_random = np.zeros(NUM_EPISODES)
-rewards_fourarmed = np.zeros(NUM_EPISODES)
 
 
-# ## 4-Armed Bandit Training Loop
-# for episode in range(NUM_EPISODES):
-#     env = SnakeEnv(width=WIDTH, height=HEIGHT)
+agent_random = Snake()
+agent_fourarmed = Snake_FourArmedBandit()
+agent_ass = Snake_Associative()
 
-#     while not env.game_over:
-#         reward = agent_random.forward(env)
-#         rewards_random[episode] += reward
-#         draw_frame(env)
-
-#     print(f"\n Training... Episode {episode+1}/{NUM_EPISODES}")
-
-
-## 4-Armed Bandit Training Loop
 for episode in range(NUM_EPISODES):
-    env = SnakeEnv(width=WIDTH, height=HEIGHT)
-
-    while not env.game_over:
-        reward = agent_fourarmed.forward(env)
-        rewards_fourarmed[episode] += reward
-        draw_frame(env)
-
     print(f"\n Training... Episode {episode+1}/{NUM_EPISODES}")
+    # agent_random.train()
+    # agent_fourarmed.train()
+    agent_ass.train()
 
 
-# Demo loop
-agent_fourarmed.isTraining = False
-env = SnakeEnv(width=WIDTH, height=HEIGHT)
-while not env.game_over:
-    action = agent_fourarmed.forward(env)
-    draw_frame(env)
-    time.sleep(TICK_RATE)
-
-
-for v in agent_fourarmed.q_values:
-    print(f"State: {dir} => Value: {v:.2f} \n")
+print(agent_ass.max_score)
 
 # Plot training rewards and save to working directory
 try:
+
+    episodes = np.arange(NUM_EPISODES)
     plt.figure(figsize=(10, 6))
     # Calculate cumulative moving average
-    cumulative_avg = np.cumsum(rewards_fourarmed) / (steps + 1)
+    cumulative_avg = np.cumsum(agent_ass.rewards) / (episodes + 1)
+    cum_scores = np.cumsum(agent_ass.scores) / (episodes + 1)
+    # cumulative_avg_1 = np.cumsum(agent_random.rewards) / (episodes + 1)
     
-    plt.plot(steps, rewards_fourarmed, label="Four-Armed Bandit (Episode Reward)", alpha=0.5)
-    plt.plot(steps, cumulative_avg, label="Four-Armed Bandit (Cumulative Average)", linewidth=2)
+    plt.plot(episodes, agent_ass.rewards, label="Associative (Episode Reward)", alpha=0.2)
+    plt.plot(episodes, cumulative_avg, label="Associative (Cumulative Average)", linewidth=2)
+    plt.plot(episodes, cum_scores, label="Cummulative Scores", linewidth=2)
+    # plt.plot(episodes, cumulative_avg_1, label="Random Walk(Cumulative Average)", linewidth=2)
     
     plt.xlabel("Episode")
-    plt.ylabel("Total Reward")
+    plt.ylabel("Average Total Reward")
     plt.title("Training Rewards Comparison")
     plt.grid(True)
     plt.legend()
