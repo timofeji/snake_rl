@@ -3,13 +3,14 @@ import random
 
 import numpy as np
 
-ACTION_SPACE = {
+ACTION_TO_DIR = {
     0: (1, 0),   # Right
     1: (-1, 0),  # Left
     2: (0, 1),   # Down
     3: (0, -1)   # Up
 }
 
+DIR_TO_ACTION = {i: s for s, i in ACTION_TO_DIR.items()}
 
 class SnakeEnv():
     def __init__(self, width=20, height=20):
@@ -26,7 +27,6 @@ class SnakeEnv():
         start_x = self.WIDTH // 2
         start_y = self.HEIGHT // 2
         self.clip_length = 1 // self.WIDTH 
-
 
         self.snake = [
             (start_x, start_y),
@@ -56,53 +56,61 @@ class SnakeEnv():
 
     def update_direction(self, action):
         """Updates the snake's direction based on the action."""
-        new_direction = ACTION_SPACE.get(action, self.direction)
+        new_direction = ACTION_TO_DIR.get(action, self.direction)
+        self.last_action = action
         # Prevent the snake from reversing
         # A reversal would have both components be the negation of the current direction.
         # Only allow the new direction if it's not the exact opposite.
         if not (new_direction[0] == -self.direction[0] and new_direction[1] == -self.direction[1]):
             self.direction = new_direction
-            self.last_action = action
 
-    def distance(self, pos1, pos2):
-        """Calculates the Euclidean distance between two points."""
-        return abs(pos1[0] - pos2[0])  + abs(pos1[1] - pos2[1])
-
-    def isDangerous(self, pos):
+    def isColliding(self, pos):
         x, y = pos
-        # check boundaries
-        if not (0 <= x < self.WIDTH and 0 <= y < self.HEIGHT):
-            return True
-        # check collision with body (skip tail)
-        for segment in self.snake[:-1]:
-            if pos == segment:
-                return True
-        return False
+        # Combined boundary and body check
+        return not (0 <= x < self.WIDTH and 0 <= y < self.HEIGHT) or pos in self.snake[:-1]
 
     def updateState(self):
-        head_pos = self.snake[0]
-        food_dx = self.snake[0][0] - self.food_pos[0]
-        food_dy = self.snake[0][1] - self.food_pos[1]
-
-        dx = head_pos[0] + self.direction[0]
-        dy = head_pos[1] + self.direction[1]
-        forward = self.isDangerous((dx, dy))
-        left = self.isDangerous((-dy, dx))
-        right = self.isDangerous((dy, -dx))
-
-        length = len(self.snake)
+        head_x, head_y = self.snake[0]
+        food_dx = head_x - self.food_pos[0] + 19
+        food_dy = head_y - self.food_pos[1] + 19
         
-
-        # self.state = (self.last_action,food_dx, food_dy, forward, left, right)
-        self.state = (
-            self.last_action,
-            int(np.clip(3 * length * self.clip_length , 0, 2)),
-            food_dx,
-            food_dy,
-            forward,
-            left,
-            right,
+        dx, dy = self.direction
+        
+        # Pre-compute collision positions
+        collision_positions = (
+            (head_x + dx, head_y + dy),
+            (head_x + 4*dx, head_y + 4*dy),
+            (head_x + dx + dy, head_y + dy - dx),
+            (head_x + 4*dx + 4*dy, head_y + 4*dy - 4*dx),
+            (head_x + dy, head_y - dx),
+            (head_x + 4*dy, head_y - 4*dx),
+            (head_x + dx - dy, head_y + dy + dx),
+            (head_x + 4*dx - 4*dy, head_y + 4*dy + 4*dx)
         )
+        
+        # Convert snake body to set once (if not already cached)
+        body_set = set(self.snake[:-1])
+        
+        # Check collisions using bitwise operations
+        collision_bits = sum(
+            1 << i for i, pos in enumerate(collision_positions)
+            if not (0 <= pos[0] < self.WIDTH and 0 <= pos[1] < self.HEIGHT) or pos in body_set
+        )
+        
+        self.state = ((DIR_TO_ACTION[self.direction] * 39 + food_dx) * 39 + food_dy) * 256 + collision_bits
+  
+        
+        
+        # self.state = (self.last_action,food_dx, food_dy, forward, left, right)
+        # self.state = tuple((
+        #     DIR_TO_ACTION[self.direction],
+        #     # 
+        #     food_dx,
+        #     food_dy,
+        #     forward,
+        #     left,
+        #     right,
+        # ))
 
     def step(self, action):
         """Moves the snake, checks for collisions and food."""
@@ -114,11 +122,6 @@ class SnakeEnv():
         dx, dy = self.direction
         new_head = (head_x + dx, head_y + dy)
 
-        # old_dist = self.distance(self.snake[0], self.food_pos)
-        # new_dist = self.distance(new_head, self.food_pos)
-
-        # reward = -.5 if new_dist >= old_dist else 0.05
-
         old_dx = self.food_pos[0] - head_x
         old_dy = self.food_pos[1] - head_y
         new_dx = self.food_pos[0] - new_head[0]
@@ -127,23 +130,19 @@ class SnakeEnv():
         old_dist_sq = old_dx**2 + old_dy**2
         new_dist_sq = new_dx**2 + new_dy**2
 
-        reward = 0.05 if new_dist_sq < old_dist_sq else -0.5
+        reward = 1 if new_dist_sq < old_dist_sq else -.1
 
         if new_head == self.food_pos:
             self.score += 1
             self.place_food()
-            reward = 100
+            reward = 10
             self.time_alive = 0
         else:
             self.snake.pop()
 
-        if self.isDangerous(new_head):
+        if self.isColliding(new_head):
             self.game_over = True
-            reward = -155 
-
-        reward -= .0005*self.time_alive
-
-        self.time_alive += 1
+            reward = -15
 
         self.snake.insert(0, new_head)
         self.updateState()

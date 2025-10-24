@@ -5,12 +5,12 @@ import os
 import argparse
 import matplotlib.pyplot as plt
 
-from lib.agent import Snake, Snake_Associative, Snake_FourArmedBandit, Snake_Associative_Body
+from lib.agent import Snake, Snake_Associative, Snake_FourArmedBandit, Snake_Associative_Body, Snake_MonteCarlo
 from lib.term import clear_screen, draw_frame
 
 
 parser = argparse.ArgumentParser(description="Train Snake agents (with faster options)")
-parser.add_argument("--episodes", type=int, default=2575000, help="Number of training episodes")
+parser.add_argument("--episodes", type=int, default=15750000, help="Number of training episodes")
 parser.add_argument("--tick", type=float, default=0.02, help="Tick rate for demo playback")
 parser.add_argument("--no-plot", action="store_true", help="Skip plotting/saving training plot")
 parser.add_argument("--no-draw", action="store_true", help="Disable drawing during training/demo to speed up")
@@ -28,62 +28,64 @@ clear_screen()
 
 agent_random = Snake()
 agent_fourarmed = Snake_FourArmedBandit()
-agent_ass = Snake_Associative_Body()
+agent_ass = Snake_MonteCarlo()
+agent_ass.load()
 
-# for episode in range(NUM_EPISODES):
-#     agent_ass.train()
+for episode in range(NUM_EPISODES):
+    agent_ass.train()
 
     
-#     if episode % 100 == 0:
-#         out = f"Training... \nEpisode [{episode+1}/{NUM_EPISODES}] Top Score[{agent_ass.max_score}]" 
-#         sys.stdout.write("\033[?25l") 
-#         sys.stdout.write("\033[H")  
-#         sys.stdout.write(out)
-#         sys.stdout.flush()
-#         sys.stdout.write("\033[?25h")
-#         agent_ass.scores.append(agent_ass.env.score)
+    if episode % 100 == 0:
+        out = f"Training... \nEpisode [{episode+1}/{NUM_EPISODES}] Top Score[{agent_ass.max_score}]" 
+        sys.stdout.write("\033[?25l") 
+        sys.stdout.write("\033[H")  
+        sys.stdout.write(out)
+        sys.stdout.flush()
+        sys.stdout.write("\033[?25h")
+        agent_ass.scores.append(agent_ass.env.score)
 
 
-# # Optionally plot results
-# if not args.no_plot:
-#     try:
-#         episodes = np.arange(NUM_EPISODES)
-#         plt.figure(figsize=(10, 6))
+# Optionally plot results
+if not args.no_plot:
+    try:
+        episodes = np.arange(NUM_EPISODES)
+        plt.figure(figsize=(10, 6))
 
-#         # rewards = np.array(agent_ass.rewards)
-#         scores = np.array(agent_ass.scores)
-#         n = np.arange(len(scores))
+        # rewards = np.array(agent_ass.rewards)
+        scores = np.array(agent_ass.scores)
+        n = np.arange(len(scores))
 
-#         window = 100  # number of episodes to average over
-#         if len(scores) >= window:
-#             smoothed_scores = np.convolve(scores, np.ones(window)/window, mode='valid')
-#             plt.plot(np.arange(len(smoothed_scores)), smoothed_scores, label=f"Score (window={window})", linewidth=2)
+        window = 100  # number of episodes to average over
+        if len(scores) >= window:
+            smoothed_scores = np.convolve(scores, np.ones(window)/window, mode='valid')
+            plt.plot(np.arange(len(smoothed_scores)), smoothed_scores, label=f"Score (window={window})", linewidth=2)
 
 
-#         # plt.plot(episodes[:n], rewards, label="Associative (Episode Reward)", alpha=0.2)
-#         # plt.plot(x_moving, moving_rewards, label=f"Associative (Moving Avg, window={MOVING_AVG_WINDOW})", linewidth=2)
-#         # plt.plot(n, scores, label=f"Avg Scores ", linewidth=2)
-#         plt.xlabel("Episode")
-#         plt.ylabel("Average Total Reward")
-#         plt.title("Training Rewards Comparison")
-#         plt.grid(True)
-#         plt.legend()
-#         out_path = os.path.join(os.getcwd(), "training_rewards.png")
-#         plt.savefig(out_path, bbox_inches="tight")
-#         plt.close()
-#         print(f"Saved training plot to {out_path}")
-#     except Exception as e:
-#         print(f"Failed to create/save training plot: {e}")
+        # plt.plot(episodes[:n], rewards, label="Associative (Episode Reward)", alpha=0.2)
+        # plt.plot(x_moving, moving_rewards, label=f"Associative (Moving Avg, window={MOVING_AVG_WINDOW})", linewidth=2)
+        # plt.plot(n, scores, label=f"Avg Scores ", linewidth=2)
+        plt.xlabel("Episode")
+        plt.ylabel("Average Total Reward")
+        plt.title("Training Rewards Comparison")
+        plt.grid(True)
+        plt.legend()
+        out_path = os.path.join(os.getcwd(), "training_rewards.png")
+        plt.savefig(out_path, bbox_inches="tight")
+        plt.close()
+        print(f"Saved training plot to {out_path}")
+    except Exception as e:
+        print(f"Failed to create/save training plot: {e}")
 
-agent_ass.load("2")
+agent_ass.save()
 # agent_ass.load("model_checkpoint.pkl")
 # Demo playback (greedy) — only run if drawing is enabled
 if not args.no_draw:
-    agent_ass.epsilon = 0
     while True:
         agent_ass.env.reset()
         while not agent_ass.env.game_over:
-            agent_ass.forward()
+            s = agent_ass.env.state
+            a = agent_ass.policy[s]
+            agent_ass.env.step(a)
 
             draw_frame(agent_ass.env)
             time.sleep(TICK_RATE)

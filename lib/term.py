@@ -129,10 +129,14 @@ def color(text, color):
 
 def draw_frame(env):
 
+    if(env.game_over):
+        return
+
     # Create a grid buffer for the frame
     buffer = [[color("  ",COLOR_BLACK_BG) for _ in range(env.WIDTH)] for _ in range(env.HEIGHT)]
 
     for i, (x, y) in enumerate(env.snake):
+
         char = color(GLYPH_SNAKE_BODY, COLOR_SNAKE_HEAD if i == 0 else COLOR_SNAKE)
         buffer[y][x] = char + color(" ", COLOR_BLACK_BG)
 

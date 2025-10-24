@@ -7,7 +7,7 @@ import pickle
 
 
 from lib.term import draw_frame
-from lib.env import ACTION_SPACE, SnakeEnv
+from lib.env import ACTION_TO_DIR, SnakeEnv
 
 
 WIDTH = 20
@@ -25,7 +25,7 @@ class Snake():
         train_rewards = []
         train_steps = 0
         while not self.env.game_over:
-            step_reward = self.forward()
+            step_reward = self.step()
             train_rewards.append(step_reward)
             train_steps += 1
 
@@ -34,7 +34,7 @@ class Snake():
         self.rewards.append(sum(train_rewards)/train_steps)
 
     """Abstract base class for snake bot algorithms."""
-    def forward(self) -> int:
+    def step(self) -> int:
         """
         Calculate the next action for the snake and advance on step
         Returns:
@@ -84,12 +84,12 @@ class Snake_FourArmedBandit(Snake):
     """
     def __init__(self, learning_rate=0.1, exploration_rate=0.01):
         super().__init__()
-        self.q_values = [0 for _ in range(len(ACTION_SPACE))]  # State-Value dictionary
-        self.num_action_taken  = [0 for _ in range(len(ACTION_SPACE))]  # Nt(a)
+        self.q_values = [0 for _ in range(len(ACTION_TO_DIR))]  # State-Value dictionary
+        self.num_action_taken  = [0 for _ in range(len(ACTION_TO_DIR))]  # Nt(a)
         self.learning_rate = learning_rate  # α
         self.epsilon = exploration_rate
 
-    def forward(self) -> int:
+    def step(self) -> int:
         # eplore if random float below epsilon, else choose greedy action
         action = random.randint(0, 3) if random.random() < self.epsilon else np.argmax(self.q_values)
 
@@ -157,7 +157,7 @@ class Snake_Associative(Snake):
         # q(s) -> {q_value(a | state)} for all a
 
         num_states =  self.env.WIDTH * self.env.WIDTH *self.env.HEIGHT *self.env.HEIGHT
-        self.q_values = np.full((num_states, len(ACTION_SPACE)), -.1)
+        self.q_values = np.full((num_states, len(ACTION_TO_DIR)), -.1)
 
     def train(self):
         self.env.reset()
@@ -165,7 +165,7 @@ class Snake_Associative(Snake):
         train_steps = 0
 
         while not self.env.game_over:
-            step_reward = self.forward()
+            step_reward = self.step()
             train_rewards.append(step_reward)
             train_steps += 1
             # draw_frame(self.env)
@@ -174,7 +174,7 @@ class Snake_Associative(Snake):
         self.scores.append(self.env.score)
         self.max_score = max(self.env.score, self.max_score)
 
-    def forward(self) -> int:
+    def step(self) -> int:
         grid_size = self.env.WIDTH * self.env.HEIGHT
 
         food_index = self.env.food_pos[1] * self.env.WIDTH + self.env.food_pos[0]
@@ -278,16 +278,16 @@ class Snake_Associative_Body(Snake):
     def train(self):
         self.env.reset()
         while not self.env.game_over:
-            step_reward = self.forward()
+            step_reward = self.step()
             # draw_frame(self.env)
 
         self.max_score = max(self.env.score, self.max_score)
 
-    def forward(self) -> int:
+    def step(self) -> int:
         state = self.env.state
 
         if state not in self.q_values:
-            self.q_values[state] = [0] * len(ACTION_SPACE)
+            self.q_values[state] = [0] * len(ACTION_TO_DIR)
 
         # eplore if random float below epsilon, else choose greedy action
         action = (
@@ -302,7 +302,7 @@ class Snake_Associative_Body(Snake):
 
         # Initialize state_prime if not seen before
         if state_prime not in self.q_values:
-            self.q_values[state_prime] = [0] * len(ACTION_SPACE)
+            self.q_values[state_prime] = [0] * len(ACTION_TO_DIR)
 
         # If the environment reached a terminal state (game over) after taking the action,
         # the target should be just the immediate reward (no bootstrapped future value).
@@ -312,9 +312,9 @@ class Snake_Associative_Body(Snake):
             target = reward + self.discount_factor * max(self.q_values[state_prime])
 
         # Standard TD/Q-learning incremental update
-        self.q_values[state][action] = self.q_values[state][action] + self.learning_rate * (
-            target - self.q_values[state][action]
-        )
+        self.q_values[state][action] = (1 - self.learning_rate) * self.q_values[state][
+            action
+        ] + self.learning_rate * (target - self.q_values[state][action])
 
         return reward
 
@@ -355,6 +355,105 @@ class Snake_Associative_Body(Snake):
                 save_data = pickle.load(f)
 
             self.q_values = save_data['q_values']
+
+            print(f"Model loaded from {filepath}")
+            print(f"  Episodes trained: {len(self.rewards)}")
+            print(f"  Max score: {self.max_score}")
+            return True
+        except Exception as e:
+            print(f"Failed to load model: {e}")
+            return False
+
+
+class Snake_MonteCarlo(Snake):
+    """
+    """
+    def __init__(self, width=20, height=20, learning_rate=0.025, discount_factor=.95, exploration_rate = 0.1):
+        super().__init__()
+        self.max_score = 0
+        self.learning_rate = learning_rate  # α
+        self.discount_factor = discount_factor
+        self.epsilon = exploration_rate 
+        # self.q_values = {}
+        # self.policy = {}
+        # self.returns = {}
+
+        self.num_actions = len(ACTION_TO_DIR)
+
+        grid_size = (width * height) - 1
+        num_states = 4 * grid_size * grid_size * 256
+        self.q_values = np.zeros((num_states, len(ACTION_TO_DIR)), dtype=np.float32)
+        self.policy = np.zeros(num_states, dtype=np.int8)
+        self.rng = np.random.default_rng()
+
+    def train(self):
+        self.env.reset()
+
+        episode = []
+        while not self.env.game_over:
+            s = self.env.state
+            a = self.rng.integers(self.num_actions) if self.rng.random() < self.epsilon else  self.policy[s]
+            r = self.env.step(a)
+            episode.append((s,a,r))
+
+        states, actions, rewards = zip(*episode)
+        rewards = np.array(rewards, dtype=np.float32)
+
+        # discounted cumulative sum from the end
+        discounts = self.discount_factor ** np.arange(len(rewards))
+        returns = np.flip(np.cumsum(np.flip(rewards * discounts))) / discounts
+
+        visited = set()
+        for s, a, G in zip(states, actions, returns):
+            key = (s, a)
+            if key in visited:  # only first occurrence from end
+                continue
+            visited.add(key)
+            current_q = self.q_values[s, a]
+            self.q_values[s, a] += self.learning_rate * (G - current_q)
+            self.policy[s] = np.argmax(self.q_values[s])
+
+        self.max_score = max(self.env.score, self.max_score)
+
+    def save(self, filepath="montecarlo.pkl"):
+        """
+        Save Q-values table and training metrics to a pickle file.
+        
+        Args:
+            filepath: Path where the model will be saved (default: "model_checkpoint.pkl")
+        """
+        save_data = {
+            'q_values': self.q_values,
+            'policy' :self.policy
+        }
+
+        try:
+            with open(filepath, 'wb') as f:
+                pickle.dump(save_data, f)
+            print(f"Model saved to {filepath}")
+        except Exception as e:
+            print(f"Failed to save model: {e}")
+
+    def load(self, filepath="montecarlo.pkl"):
+        """
+        Load Q-values table and training metrics from a pickle file.
+        
+        Args:
+            filepath: Path to the saved model file (default: "model_checkpoint.pkl")
+        
+        Returns:
+            True if load was successful, False otherwise
+        """
+        if not os.path.exists(filepath):
+            print(f"No saved model found at {filepath}")
+            return False
+
+        try:
+            with open(filepath, 'rb') as f:
+                save_data = pickle.load(f)
+
+            self.q_values = save_data['q_values']
+            self.policy = save_data['policy']
 
             print(f"Model loaded from {filepath}")
             print(f"  Episodes trained: {len(self.rewards)}")
