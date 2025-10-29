@@ -1,9 +1,15 @@
 # --- Bot Algorithm Base Class ---
+from collections import deque
 import math
 import os
 import random
 import numpy as np
 import pickle
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 
 from lib.term import draw_frame
@@ -13,8 +19,9 @@ from lib.env import ACTION_TO_DIR, SnakeEnv
 WIDTH = 20
 HEIGHT = 20
 
-class Snake():
+class Snake(nn.Module):
     def __init__(self):
+        super().__init__()
         self.env = SnakeEnv(width=WIDTH, height=HEIGHT)
         self.rewards = []
         self.scores = []
@@ -458,6 +465,255 @@ class Snake_MonteCarlo(Snake):
             print(f"Model loaded from {filepath}")
             print(f"  Episodes trained: {len(self.rewards)}")
             print(f"  Max score: {self.max_score}")
+            return True
+        except Exception as e:
+            print(f"Failed to load model: {e}")
+            return False
+
+
+class Snake_DQN(Snake):
+    """
+    Deep Q-Network (DQN) implementation for Snake
+    
+    Key components:
+    1. Q-Network: Neural network that approximates Q(s,a)
+    2. Target Network: Stabilizes training by providing fixed targets
+    3. Replay Buffer: Stores experiences for experience replay
+    4. Epsilon-greedy: Balances exploration vs exploitation
+    """
+    def __init__(self, width=20, height=20, learning_rate=0.001, discount_factor=.95, 
+                 exploration_rate=0.1, epsilon_decay=0.995, epsilon_min=0.01, 
+                 batch_size=64, target_update_freq=10):
+        super().__init__()
+        self.max_score = 0
+        self.learning_rate = learning_rate
+        self.discount_factor = discount_factor
+        self.epsilon = exploration_rate
+        self.epsilon_decay = epsilon_decay
+        self.epsilon_min = epsilon_min
+        self.batch_size = batch_size
+        self.target_update_freq = target_update_freq
+        self.update_counter = 0
+
+        # Set up device (GPU if available, otherwise CPU)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
+
+        self.rng = np.random.default_rng()
+        self.replay_buffer = deque(maxlen=10000)
+
+        self.num_actions = len(ACTION_TO_DIR)
+        self.state_size = width * height
+        hidden_dim = 128  # More reasonable hidden dimension
+
+        # Q-Network (policy network)
+        self.q_net = nn.Sequential(
+            nn.Linear(self.state_size, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, self.num_actions)
+        ).to(self.device)
+
+        # Target Network (for stable Q-learning)
+        self.target_net = nn.Sequential(
+            nn.Linear(self.state_size, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, self.num_actions)
+        ).to(self.device)
+
+        # Initialize target network with same weights as Q-network
+        self.target_net.load_state_dict(self.q_net.state_dict())
+        self.target_net.eval()  # Target network is only used for inference
+
+        # Optimizer for training the Q-network
+        self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=self.learning_rate)
+        self.loss_fn = nn.MSELoss()
+
+    def state_to_tensor(self, state):
+        """Convert 2D grid state to flat tensor"""
+        # state is a 2D list from env, flatten it
+        flat_state = np.array(state).flatten()
+        return torch.FloatTensor(flat_state).unsqueeze(0).to(self.device)  # Add batch dimension and move to device
+
+    def select_action(self, state):
+        """Epsilon-greedy action selection"""
+        if self.rng.random() < self.epsilon:
+            return self.rng.integers(self.num_actions)
+        else:
+            with torch.no_grad():
+                state_tensor = self.state_to_tensor(state)
+                q_values = self.q_net(state_tensor)
+                return q_values.argmax().item()
+
+    def store_transition(self, state, action, reward, next_state, done):
+        """Store experience in replay buffer"""
+        self.replay_buffer.append((state, action, reward, next_state, done))
+
+    def sample_batch(self):
+        """Sample a random batch from replay buffer"""
+        if len(self.replay_buffer) < self.batch_size:
+            return None
+        
+        indices = self.rng.choice(len(self.replay_buffer), size=self.batch_size, replace=False)
+        batch = [self.replay_buffer[i] for i in indices]
+        
+        states, actions, rewards, next_states, dones = zip(*batch)
+        
+        # Convert to tensors and move to device
+        states_tensor = torch.cat([self.state_to_tensor(s) for s in states])
+        actions_tensor = torch.LongTensor(actions).to(self.device)
+        rewards_tensor = torch.FloatTensor(rewards).to(self.device)
+        next_states_tensor = torch.cat([self.state_to_tensor(s) for s in next_states])
+        dones_tensor = torch.FloatTensor(dones).to(self.device)
+        
+        return states_tensor, actions_tensor, rewards_tensor, next_states_tensor, dones_tensor
+
+    def learn(self):
+        """Perform one step of Q-learning using a batch from replay buffer"""
+        batch = self.sample_batch()
+        if batch is None:
+            return None
+        
+        states, actions, rewards, next_states, dones = batch
+        
+        # Current Q values: Q(s, a)
+        current_q = self.q_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
+        
+        # Next Q values from target network: max_a' Q_target(s', a')
+        with torch.no_grad():
+            next_q = self.target_net(next_states).max(1)[0]
+            # If done, there's no next state value
+            target_q = rewards + (1 - dones) * self.discount_factor * next_q
+        
+        # Compute loss
+        loss = self.loss_fn(current_q, target_q)
+        
+        # Optimize
+        self.optimizer.zero_grad()
+        loss.backward()
+        # Clip gradients to prevent exploding gradients
+        torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), max_norm=1.0)
+        self.optimizer.step()
+        
+        return loss.item()
+
+    def update_target_network(self):
+        """Copy weights from Q-network to target network"""
+        self.target_net.load_state_dict(self.q_net.state_dict())
+
+    def train(self):
+        """Train for one episode"""
+        self.env.reset()
+        episode_reward = 0
+        episode_steps = 0
+        losses = []
+
+        while not self.env.game_over:
+            state = self.env.state
+            action = self.select_action(state)
+            reward = self.env.step(action)
+            next_state = self.env.state
+            done = self.env.game_over
+            
+            # Store transition
+            self.store_transition(state, action, reward, next_state, done)
+            
+            # Learn from experience
+            if len(self.replay_buffer) >= self.batch_size:
+                loss = self.learn()
+                if loss is not None:
+                    losses.append(loss)
+            
+            episode_reward += reward
+            episode_steps += 1
+            
+            # Uncomment to visualize training
+            # draw_frame(self.env)
+
+        # Update target network periodically
+        self.update_counter += 1
+        if self.update_counter % self.target_update_freq == 0:
+            self.update_target_network()
+
+        # Decay epsilon
+        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
+
+        # Track metrics
+        avg_reward = episode_reward / episode_steps if episode_steps > 0 else 0
+        self.rewards.append(avg_reward)
+        self.scores.append(self.env.score)
+        self.max_score = max(self.env.score, self.max_score)
+        
+        avg_loss = np.mean(losses) if losses else 0
+        return {
+            'score': self.env.score,
+            'avg_reward': avg_reward,
+            'avg_loss': avg_loss,
+            'epsilon': self.epsilon,
+            'steps': episode_steps
+        }
+
+    def save(self, filepath="dqn_checkpoint.pth"):
+        """Save DQN model and training state"""
+        save_data = {
+            'q_net_state_dict': self.q_net.state_dict(),
+            'target_net_state_dict': self.target_net.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'epsilon': self.epsilon,
+            'max_score': self.max_score,
+            'rewards': self.rewards,
+            'scores': self.scores,
+            'update_counter': self.update_counter,
+            'hyperparameters': {
+                'learning_rate': self.learning_rate,
+                'discount_factor': self.discount_factor,
+                'epsilon_decay': self.epsilon_decay,
+                'epsilon_min': self.epsilon_min,
+                'batch_size': self.batch_size,
+                'target_update_freq': self.target_update_freq
+            }
+        }
+
+        try:
+            torch.save(save_data, filepath)
+            print(f"Model saved to {filepath}")
+        except Exception as e:
+            print(f"Failed to save model: {e}")
+
+    def load(self, filepath="dqn_checkpoint.pth"):
+        """Load DQN model and training state"""
+        if not os.path.exists(filepath):
+            print(f"No saved model found at {filepath}")
+            return False
+
+        try:
+            save_data = torch.load(filepath, map_location=self.device)
+            
+            self.q_net.load_state_dict(save_data['q_net_state_dict'])
+            self.target_net.load_state_dict(save_data['target_net_state_dict'])
+            self.optimizer.load_state_dict(save_data['optimizer_state_dict'])
+            
+            self.epsilon = save_data['epsilon']
+            self.max_score = save_data['max_score']
+            self.rewards = save_data['rewards']
+            self.scores = save_data['scores']
+            self.update_counter = save_data['update_counter']
+            
+            hyper = save_data['hyperparameters']
+            self.learning_rate = hyper['learning_rate']
+            self.discount_factor = hyper['discount_factor']
+            self.epsilon_decay = hyper['epsilon_decay']
+            self.epsilon_min = hyper['epsilon_min']
+            self.batch_size = hyper['batch_size']
+            self.target_update_freq = hyper['target_update_freq']
+
+            print(f"Model loaded from {filepath}")
+            print(f"  Episodes trained: {len(self.rewards)}")
+            print(f"  Max score: {self.max_score}")
+            print(f"  Current epsilon: {self.epsilon:.4f}")
             return True
         except Exception as e:
             print(f"Failed to load model: {e}")

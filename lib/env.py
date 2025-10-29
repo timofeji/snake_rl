@@ -1,6 +1,6 @@
 # --- Game Configuration ---
 import random
-
+import torch
 import numpy as np
 
 ACTION_TO_DIR = {
@@ -70,47 +70,57 @@ class SnakeEnv():
         return not (0 <= x < self.WIDTH and 0 <= y < self.HEIGHT) or pos in self.snake[:-1]
 
     def updateState(self):
-        head_x, head_y = self.snake[0]
-        food_dx = head_x - self.food_pos[0] + 19
-        food_dy = head_y - self.food_pos[1] + 19
-        
-        dx, dy = self.direction
-        
-        # Pre-compute collision positions
-        collision_positions = (
-            (head_x + dx, head_y + dy),
-            (head_x + 4*dx, head_y + 4*dy),
-            (head_x + dx + dy, head_y + dy - dx),
-            (head_x + 4*dx + 4*dy, head_y + 4*dy - 4*dx),
-            (head_x + dy, head_y - dx),
-            (head_x + 4*dy, head_y - 4*dx),
-            (head_x + dx - dy, head_y + dy + dx),
-            (head_x + 4*dx - 4*dy, head_y + 4*dy + 4*dx)
-        )
-        
-        # Convert snake body to set once (if not already cached)
-        body_set = set(self.snake[:-1])
-        
-        # Check collisions using bitwise operations
-        collision_bits = sum(
-            1 << i for i, pos in enumerate(collision_positions)
-            if not (0 <= pos[0] < self.WIDTH and 0 <= pos[1] < self.HEIGHT) or pos in body_set
-        )
-        
-        self.state = ((DIR_TO_ACTION[self.direction] * 39 + food_dx) * 39 + food_dy) * 256 + collision_bits
-  
-        
-        
-        # self.state = (self.last_action,food_dx, food_dy, forward, left, right)
-        # self.state = tuple((
-        #     DIR_TO_ACTION[self.direction],
-        #     # 
-        #     food_dx,
-        #     food_dy,
-        #     forward,
-        #     left,
-        #     right,
-        # ))
+        if(self.game_over):
+            return
+
+        self.state = [0] * (self.WIDTH * self.HEIGHT)
+
+        food_x, food_y = self.food_pos
+        self.state[food_y * self.WIDTH + food_x] = 1
+
+        for s in self.snake:
+            self.state[s[1] * self.WIDTH + s[0]] = 2
+
+    # def updateState(self):
+    #     head_x, head_y = self.snake[0]
+    #     food_dx = head_x - self.food_pos[0] + 19
+    #     food_dy = head_y - self.food_pos[1] + 19
+
+    #     dx, dy = self.direction
+
+    #     # Pre-compute collision positions
+    #     collision_positions = (
+    #         (head_x + dx, head_y + dy),
+    #         (head_x + 4*dx, head_y + 4*dy),
+    #         (head_x + dx + dy, head_y + dy - dx),
+    #         (head_x + 4*dx + 4*dy, head_y + 4*dy - 4*dx),
+    #         (head_x + dy, head_y - dx),
+    #         (head_x + 4*dy, head_y - 4*dx),
+    #         (head_x + dx - dy, head_y + dy + dx),
+    #         (head_x + 4*dx - 4*dy, head_y + 4*dy + 4*dx)
+    #     )
+
+    #     # Convert snake body to set once (if not already cached)
+    #     body_set = set(self.snake[:-1])
+
+    #     # Check collisions using bitwise operations
+    #     collision_bits = sum(
+    #         1 << i for i, pos in enumerate(collision_positions)
+    #         if not (0 <= pos[0] < self.WIDTH and 0 <= pos[1] < self.HEIGHT) or pos in body_set
+    #     )
+
+    #     self.state = ((DIR_TO_ACTION[self.direction] * 39 + food_dx) * 39 + food_dy) * 256 + collision_bits
+
+    # self.state = (self.last_action,food_dx, food_dy, forward, left, right)
+    # self.state = tuple((
+    #     DIR_TO_ACTION[self.direction],
+    #     #
+    #     food_dx,
+    #     food_dy,
+    #     forward,
+    #     left,
+    #     right,
+    # ))
 
     def step(self, action):
         """Moves the snake, checks for collisions and food."""
